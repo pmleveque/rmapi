@@ -153,8 +153,12 @@ func parseIndex(f io.Reader) ([]*Entry, string, error) {
 func (t *HashTree) IndexReader() (io.Reader, error) {
 	var w bytes.Buffer
 
-	// Always write v4 format: the server now requires SHA256-based hashes (v4)
-	// for new root writes, even when the existing root is v3.
+	// t.SchemaVersion records the format read from the server during Mirror().
+	// For writes, always emit v4 root indexes: current servers reject new
+	// v3-format root docSchema uploads even when the v3 HashEntries hash
+	// matches the body. Rehash() always SHA-256s the serialized output, so
+	// RMAPI_FORCE_SCHEMA_VERSION=3 changes the body schema but not the hash
+	// algorithm — use it only to inspect failure modes, not as a working mode.
 	schemaVersion := SchemaVersionV4
 
 	if envSchema := os.Getenv("RMAPI_FORCE_SCHEMA_VERSION"); envSchema != "" {
