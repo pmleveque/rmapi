@@ -153,10 +153,9 @@ func parseIndex(f io.Reader) ([]*Entry, string, error) {
 func (t *HashTree) IndexReader() (io.Reader, error) {
 	var w bytes.Buffer
 
-	schemaVersion := t.SchemaVersion
-	if schemaVersion == "" {
-		schemaVersion = SchemaVersionV3
-	}
+	// Always write v4 format: the server now requires SHA256-based hashes (v4)
+	// for new root writes, even when the existing root is v3.
+	schemaVersion := SchemaVersionV4
 
 	if envSchema := os.Getenv("RMAPI_FORCE_SCHEMA_VERSION"); envSchema != "" {
 		log.Info.Printf("forcing schema version to %s via RMAPI_FORCE_SCHEMA_VERSION", envSchema)
@@ -228,42 +227,19 @@ func (t *HashTree) Remove(id string) error {
 }
 
 func (t *HashTree) Rehash() error {
-	schemaVersion := t.SchemaVersion
-	if schemaVersion == "" {
-		schemaVersion = SchemaVersionV3
+	reader, err := t.IndexReader()
+	if err != nil {
+		return err
 	}
 
-	if envSchema := os.Getenv("RMAPI_FORCE_SCHEMA_VERSION"); envSchema != "" {
-		schemaVersion = envSchema
+	schemaBytes, err := io.ReadAll(reader)
+	if err != nil {
+		return err
 	}
 
-	var hash string
-	var err error
-
-	if schemaVersion == SchemaVersionV3 {
-		entries := []*Entry{}
-		for _, e := range t.Docs {
-			entries = append(entries, &e.Entry)
-		}
-		hash, err = HashEntries(entries)
-		if err != nil {
-			return err
-		}
-	} else {
-		reader, err := t.IndexReader()
-		if err != nil {
-			return err
-		}
-
-		schemaBytes, err := io.ReadAll(reader)
-		if err != nil {
-			return err
-		}
-
-		hasher := sha256.New()
-		hasher.Write(schemaBytes)
-		hash = hex.EncodeToString(hasher.Sum(nil))
-	}
+	hasher := sha256.New()
+	hasher.Write(schemaBytes)
+	hash := hex.EncodeToString(hasher.Sum(nil))
 
 	log.Info.Println("New root hash: ", hash)
 	t.Hash = hash
@@ -300,7 +276,6 @@ func (t *HashTree) Mirror(r RemoteStorage, maxconcurrent int) error {
 		return fmt.Errorf("cannot get root hash %v", err)
 	}
 	defer rootIndexReader.Close()
-
 	entries, schema, err := parseIndex(rootIndexReader)
 	if err != nil {
 		return fmt.Errorf("cannot parse rootIndex, %v", err)
